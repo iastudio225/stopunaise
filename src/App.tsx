@@ -36,6 +36,40 @@ const municipalities: Municipality[] = [
   { name: 'Autres communes (Hors Abidjan)', zone: 'outside', deliveryFee: 3000 },
 ];
 
+// Fonction pour enregistrer la commande dans Supabase
+async function saveOrderToSupabase(order: { [key: string]: any }, items: Array<{ [key: string]: any }>) {
+  // 1. Insérer la commande principale
+  const { data: orderData, error: orderError } = await supabase
+    .from('orders')
+    .insert([order])
+    .select()
+    .single();
+
+  if (orderError) {
+    console.error('Erreur lors de la création de la commande:', orderError);
+    return false;
+  }
+
+  // 2. Insérer les items de la commande
+  const orderItems = items.map((item: { [key: string]: any }) => ({
+    order_id: orderData.id,
+    product_name: item.name,
+    quantity: item.quantity,
+    price: item.price
+  }));
+
+  const { error: itemsError } = await supabase
+    .from('order_items')
+    .insert(orderItems);
+
+  if (itemsError) {
+    console.error("Erreur lors de l'ajout des produits:", itemsError);
+    return false;
+  }
+
+  return true;
+}
+
 function App() {
   const [products, setProducts] = useState<Product[]>([
     { id: '100ml', name: 'Sniper DDVP 100ml', volume: '100ml', price: 2500, quantity: 0 },
@@ -59,6 +93,7 @@ function App() {
   
   const [productImageUrl, setProductImageUrl] = useState<string>('');
   const [logoUrl, setLogoUrl] = useState<string>('');
+  const [showThankYou, setShowThankYou] = useState(false);
 
   const dosingKitPrice = 1000;
 
@@ -100,20 +135,21 @@ function App() {
   };
 
   const calculateTotals = useCallback(() => {
-    const subtotal = products.reduce((sum, product) => sum + (product.price * product.quantity), 0);
-    const dosingKit = dosingKitQuantity * dosingKitPrice;
-    
-    // Check for free delivery (500ml or more total volume)
+    // Forcer les valeurs à être des nombres
+    const subtotal = products.reduce((sum, product) => sum + (Number(product.price) * Number(product.quantity)), 0);
+    const dosingKit = Number(dosingKitQuantity) * Number(dosingKitPrice);
+    // Calcul du volume total
     const totalVolume = products.reduce((sum, product) => {
       const volume = parseInt(product.volume.replace('ml', ''));
-      return sum + (volume * product.quantity);
+      return sum + (volume * Number(product.quantity));
     }, 0);
     const isFreeDelivery = totalVolume >= 500;
-    
-    // Only add delivery fee if municipality is selected and delivery is not free
-    const delivery = selectedMunicipality ? (isFreeDelivery ? 0 : selectedMunicipality.deliveryFee) : 0;
-    const total = subtotal + dosingKit + delivery;
-    
+    // Calcul du delivery sécurisé
+    const delivery = selectedMunicipality ? (isFreeDelivery ? 0 : Number(selectedMunicipality.deliveryFee)) : 0;
+    // Calcul du total sécurisé
+    const total = Number(subtotal) + Number(dosingKit) + Number(delivery);
+    // Log pour debug
+    console.log('subtotal:', subtotal, 'dosingKit:', dosingKit, 'delivery:', delivery, 'total:', total);
     setTotals({
       subtotal,
       dosingKit,
@@ -154,10 +190,31 @@ ${deliveryText}
 Merci pour votre commande !`;
   };
 
-  const handleWhatsAppOrder = () => {
+  const handleWhatsAppOrder = async () => {
+    const order = {
+      full_name: customerInfo.fullName,
+      phone: customerInfo.phone,
+      municipality: selectedMunicipality?.name || '',
+      total: totals.total
+    };
+    const items = products.filter(p => p.quantity > 0);
+    const success = await saveOrderToSupabase(order, items);
+    if (!success) {
+      alert('Erreur lors de l\'enregistrement de la commande. Veuillez réessayer.');
+      return;
+    }
     const message = encodeURIComponent(generateOrderSummary());
     const whatsappUrl = `https://wa.me/+2250556520604?text=${message}`;
     window.open(whatsappUrl, '_blank');
+    setShowThankYou(true);
+    // Réinitialisation des champs après la commande
+    setProducts([
+      { id: '100ml', name: 'Sniper DDVP 100ml', volume: '100ml', price: 2500, quantity: 0 },
+      { id: '250ml', name: 'Sniper DDVP 250ml', volume: '250ml', price: 6000, quantity: 0 },
+    ]);
+    setDosingKitQuantity(0);
+    setSelectedMunicipality(null);
+    setCustomerInfo({ fullName: '', phone: '' });
   };
 
   const isOrderValid = () => {
@@ -167,6 +224,24 @@ Merci pour votre commande !`;
     return hasProducts && hasCustomerInfo && hasMunicipality;
   };
 
+  // Ajout du log pour debug juste avant le return
+  console.log('AFFICHAGE totals:', totals);
+  if (showThankYou) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50">
+        <div className="bg-white rounded-xl shadow-lg p-10 text-center">
+          <h2 className="text-3xl font-bold text-green-600 mb-4">Merci pour votre commande !</h2>
+          <p className="text-lg text-gray-700 mb-6">Nous avons bien reçu votre demande. Un conseiller vous contactera très bientôt pour finaliser la livraison.</p>
+          <button
+            className="mt-4 px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
+            onClick={() => setShowThankYou(false)}
+          >
+            Revenir à la page de commande
+          </button>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -175,7 +250,7 @@ Merci pour votre commande !`;
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
               {logoUrl ? (
-                <img src={logoUrl} alt="Logo" className="h-12 w-12 object-contain" />
+                <img src={logoUrl} alt="Logo" className="h-20 w-20 object-contain" />
               ) : (
                 <Bug className="h-8 w-8 text-red-600" />
               )}
@@ -459,7 +534,7 @@ Merci pour votre commande !`;
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <div className="flex items-center justify-center space-x-2 mb-4">
             {logoUrl ? (
-              <img src={logoUrl} alt="Logo" className="h-6 w-6 object-contain" />
+              <img src={logoUrl} alt="Logo" className="h-10 w-10 object-contain" />
             ) : (
               <Bug className="h-6 w-6" />
             )}
