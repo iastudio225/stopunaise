@@ -211,7 +211,7 @@ Merci pour votre commande !`;
     }
     const message = encodeURIComponent(generateOrderSummary());
     const whatsappUrl = `https://wa.me/+2250556520604?text=${message}`;
-    window.open(whatsappUrl, '_blank');
+    window.location.href = whatsappUrl; // Redirection pour compatibilité mobile
     setShowThankYou(true);
     // Réinitialisation des champs après la commande
     setProducts([
