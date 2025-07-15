@@ -197,7 +197,13 @@ Merci pour votre commande !`;
       municipality: selectedMunicipality?.name || '',
       total: totals.total
     };
-    const items = products.filter(p => p.quantity > 0);
+    // Ajout du kit de dosage comme produit si quantité > 0
+    const items = [
+      ...products.filter(p => p.quantity > 0),
+      ...(dosingKitQuantity > 0
+        ? [{ name: 'Kit de dosage', price: dosingKitPrice, quantity: dosingKitQuantity }]
+        : [])
+    ];
     const success = await saveOrderToSupabase(order, items);
     if (!success) {
       alert('Erreur lors de l\'enregistrement de la commande. Veuillez réessayer.');
